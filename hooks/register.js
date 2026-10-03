@@ -64,7 +64,7 @@ const SETTINGS = [
     choices: [['full', 'Full'], ['compact', 'Compact'], ['auto', 'Auto']],
   },
   { group: 0, key: 'lightTheme', label: 'Light theme text', def: false, desc: 'Dark text for light backgrounds.' },
-  { group: 3, key: 'showOptionsButton', label: 'Settings button next to the band', def: true },
+  { group: 3, key: 'showOptionsButton', label: 'Settings button', def: true },
   { group: 1, key: 'show5h', label: '5-hour limit', def: true },
   { group: 1, key: 'show7d', label: 'Weekly limit', def: true },
   { group: 1, key: 'showResetTime', label: 'Reset time', def: true },
@@ -149,6 +149,8 @@ function applyTheme() {
 
 // Columns the band has, where the surface says; used by the "auto" layout
 let narrowColumns = null
+// Width of the progress bar in a pill; shrunk when the main items would not fit on one row
+let barW = 76
 
 function isCompact() {
   const layout = choice('layout', 'full')
@@ -410,7 +412,7 @@ function thinBarItem(x, o) {
   const textW = pctStr.length * 8.4 + (detail ? 8 + detail.length * CW : 0)
   let body = head + (detail ? text(x + pctStr.length * 8.4 + 8, detail, MUTED, false, 16) : '')
   if (compact) return { w: textW, svg: body }
-  const W = Math.max(150, textW)
+  const W = Math.max(Math.round(barW * 2), textW)
   body += '<rect x="' + x + '" y="21" width="' + W + '" height="4" rx="2" fill="' + TEXT + '" fill-opacity="0.14"/>'
   body += '<rect x="' + x + '" y="21" width="' + Math.max(4, (W * Math.min(100, o.pct)) / 100) + '" height="4" rx="2" fill="' + accent + '"/>'
   if (o.marker !== null && o.marker !== undefined) {
@@ -476,7 +478,7 @@ function barPill(x, o) {
   if (style === 'bars') return thinBarItem(x, o)
   if (style === 'segments') return segmentItem(x, o)
   if (style === 'stacked') return stackedItem(x, o)
-  const BAR = 76
+  const BAR = barW
   const compact = isCompact()
   let cx = x + 14
   let body = ICONS[o.icon](cx, o.color)
@@ -563,9 +565,10 @@ function statPill(x, icon, color, str) {
 // The items of the band, each built at x = 0 as { w, svg }
 function buildItems(now) {
   const makers = []
-  if (flag('show5h', true)) makers.push((px) => limitPill(px, 'five_hour', '5h', 'gauge', now))
-  if (flag('show7d', true)) makers.push((px) => limitPill(px, 'seven_day', '7d', 'calendar', now))
-  if (flag('showContext', true)) makers.push((px) => contextPill(px))
+  let mainCount = 0
+  if (flag('show5h', true)) { mainCount++; makers.push((px) => limitPill(px, 'five_hour', '5h', 'gauge', now)) }
+  if (flag('show7d', true)) { mainCount++; makers.push((px) => limitPill(px, 'seven_day', '7d', 'calendar', now)) }
+  if (flag('showContext', true)) { mainCount++; makers.push((px) => contextPill(px)) }
   if (flag('showGit', true) && git.branch) {
     makers.push((px) => statPill(px, 'branch', COLORS.git, git.branch + (git.dirty ? ' ●' : '')))
   }
@@ -577,25 +580,47 @@ function buildItems(now) {
   if (flag('showCost', false) && costUsd !== null) {
     makers.push((px) => statPill(px, 'coin', COLORS.cost, '$' + costUsd.toFixed(2)))
   }
-  return makers.map((make) => make(0))
+  // 5h, weekly and context are the main items; they are kept together on the first row
+  return makers.map((make, i) => Object.assign(make(0), { main: i < mainCount }))
 }
 
 const ROW_GAP = 6
 
-// maxW: the pixels the band may take, or null when the surface does not say. When the items do not fit,
-// the "overflow" setting decides: compact them first, or wrap them onto more rows.
+// maxW: the pixels the band may take, or null when the surface does not say. When the items do not fit:
+//  - with "compact" chosen, everything switches to the compact layout first
+//  - 5h, weekly and context are always kept on one row: their bars shrink until they fit
+//  - whatever still does not fit wraps onto the next row
 function buildSvg(now, maxW) {
   applyTheme()
   const gap = itemGap()
   const rowWidth = (list) => list.reduce((sum, p, i) => sum + p.w + (i ? gap : 0), 0)
-  let items = buildItems(now)
-  if (maxW && rowWidth(items) > maxW && choice('overflow', 'wrap') === 'compact' && !isCompact()) {
-    forced = { layout: 'compact' }
+  const mainWidth = (list) => rowWidth(list.filter((p) => p.main))
+  let compactForced = false
+  const build = () => {
+    if (compactForced) forced = { layout: 'compact' }
     try {
-      items = buildItems(now)
+      return buildItems(now)
     } finally {
       forced = {}
     }
+  }
+  let items
+  try {
+    barW = 76
+    items = build()
+    if (maxW && rowWidth(items) > maxW && choice('overflow', 'wrap') === 'compact' && !isCompact()) {
+      compactForced = true
+      items = build()
+    }
+    if (maxW && mainWidth(items) > maxW) {
+      for (const bw of [60, 48, 38, 30, 24, 16]) {
+        barW = bw
+        items = build()
+        if (mainWidth(items) <= maxW) break
+      }
+    }
+  } finally {
+    barW = 76
   }
   const rows = [[]]
   for (const p of items) {
@@ -805,7 +830,7 @@ export function register(on, options) {
       return Svg({ source: sample, alt: s.label, width: w, height: PILL_H })
     }
 
-    const hint = (s) => (s.desc ? Text({ dimColor: true, children: [s.desc] }) : null)
+    const hint = (s) => (s.desc ? Text({ dimColor: true, wrap: 'wrap', children: [s.desc] }) : null)
 
     const row = (s) => {
       if (Array.isArray(s.choices)) {
@@ -830,6 +855,8 @@ export function register(on, options) {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            flexWrap: 'wrap',
+            rowGap: 1,
             width: '100%',
             columnGap: 2,
             children: [buttons, sampleFor(s, true)],
@@ -840,6 +867,8 @@ export function register(on, options) {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            flexWrap: 'wrap',
+            rowGap: 1,
             width: '100%',
             children: [Text({ bold: true, children: [s.label] }), sampleFor(s, true)],
           }),
@@ -888,9 +917,17 @@ export function register(on, options) {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            flexWrap: 'wrap',
+            rowGap: 1,
+            columnGap: 2,
             width: '100%',
             children: [
-              Button({ key: s.key, label: (isOn ? '✅  ' : '◻  ') + s.label, plain: true, onPress: change(s, !isOn) }),
+              Button({
+                key: s.key,
+                label: (isOn ? '✓  ' : '') + s.label,
+                variant: isOn ? 'primary' : 'secondary',
+                onPress: change(s, !isOn),
+              }),
               sampleFor(s, isOn),
             ],
           }),
@@ -933,6 +970,7 @@ export function register(on, options) {
         flexDirection: 'column',
         borderStyle: 'round',
         borderDimColor: true,
+        width: '100%',
         paddingX: 2,
         paddingY: 1,
         gap: 2,
