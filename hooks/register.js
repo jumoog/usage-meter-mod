@@ -49,8 +49,7 @@ const COLOR_CHOICES = PALETTE.map(([id, name]) => [id, name])
 const GROUPS = ['Style', 'Usage limits', 'Context window', 'Extras']
 const SETTINGS = [
   {
-    group: 0, key: 'style', label: 'Design', def: 'pills',
-    desc: 'How each item is drawn.',
+    group: 0, key: 'style', label: 'Style', def: 'pills', bare: true,
     choices: [['pills', 'Pills'], ['glass', 'Glass'], ['rings', 'Rings'], ['bars', 'Thin bars'], ['segments', 'Segments'], ['stacked', 'Stacked']],
   },
   { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills and Glass styles only.' },
@@ -765,6 +764,31 @@ export function register(on, options) {
     const row = (s) => {
       if (Array.isArray(s.choices)) {
         const current = choice(s.key, s.def)
+        const buttons = Box({
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          flexShrink: 1,
+          columnGap: 1,
+          rowGap: 1,
+          children: s.choices.map(([value, name]) =>
+            Button({
+              key: s.key + ':' + value,
+              label: name,
+              variant: value === current ? 'primary' : 'secondary',
+              onPress: change(s, value),
+            }),
+          ),
+        })
+        if (s.bare) {
+          return Box({
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+            columnGap: 2,
+            children: [buttons, sampleFor(s, true)],
+          })
+        }
         const parts = [
           Box({
             flexDirection: 'row',
