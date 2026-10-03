@@ -52,6 +52,11 @@ const SETTINGS = [
     group: 0, key: 'style', label: 'Style', def: 'pills', bare: true,
     choices: [['pills', 'Pills'], ['glass', 'Glass'], ['rings', 'Rings'], ['bars', 'Thin bars'], ['segments', 'Segments'], ['stacked', 'Stacked']],
   },
+  {
+    group: 0, key: 'overflow', label: 'When the band is too wide', def: 'wrap',
+    desc: 'Wrap onto more rows, or switch to the compact layout.',
+    choices: [['wrap', 'Wrap onto more rows'], ['compact', 'Switch to compact']],
+  },
   { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills and Glass styles only.' },
   {
     group: 0, key: 'layout', label: 'Layout', def: 'full',
@@ -555,36 +560,65 @@ function statPill(x, icon, color, str) {
   return { w, svg: pillBg(x, w, color) + ICONS[icon](x + 14, color) + text(x + 14 + 24, str, TEXT) }
 }
 
-function buildSvg(now) {
-  applyTheme()
-  const parts = []
-  let x = 0
-  // pills are built at their final x, so each one's gap is settled before it is drawn
-  const place = (make) => {
-    const gap = parts.length ? itemGap() : 0
-    const p = make(x + gap)
-    parts.push(p.svg)
-    x += gap + p.w
-  }
-  if (flag('show5h', true)) place((px) => limitPill(px, 'five_hour', '5h', 'gauge', now))
-  if (flag('show7d', true)) place((px) => limitPill(px, 'seven_day', '7d', 'calendar', now))
-  if (flag('showContext', true)) place((px) => contextPill(px))
+// The items of the band, each built at x = 0 as { w, svg }
+function buildItems(now) {
+  const makers = []
+  if (flag('show5h', true)) makers.push((px) => limitPill(px, 'five_hour', '5h', 'gauge', now))
+  if (flag('show7d', true)) makers.push((px) => limitPill(px, 'seven_day', '7d', 'calendar', now))
+  if (flag('showContext', true)) makers.push((px) => contextPill(px))
   if (flag('showGit', true) && git.branch) {
-    place((px) => statPill(px, 'branch', COLORS.git, git.branch + (git.dirty ? ' ●' : '')))
+    makers.push((px) => statPill(px, 'branch', COLORS.git, git.branch + (git.dirty ? ' ●' : '')))
   }
   if (flag('showTokens', false)) {
-    place((px) => statPill(px, 'up', COLORS.up, formatTokens(totals.input)))
-    place((px) => statPill(px, 'down', COLORS.down, formatTokens(totals.output)))
-    place((px) => statPill(px, 'layers', contextColor(), formatTokens(totals.cache)))
+    makers.push((px) => statPill(px, 'up', COLORS.up, formatTokens(totals.input)))
+    makers.push((px) => statPill(px, 'down', COLORS.down, formatTokens(totals.output)))
+    makers.push((px) => statPill(px, 'layers', contextColor(), formatTokens(totals.cache)))
   }
   if (flag('showCost', false) && costUsd !== null) {
-    place((px) => statPill(px, 'coin', COLORS.cost, '$' + costUsd.toFixed(2)))
+    makers.push((px) => statPill(px, 'coin', COLORS.cost, '$' + costUsd.toFixed(2)))
   }
-  const w = Math.max(1, Math.ceil(x))
+  return makers.map((make) => make(0))
+}
+
+const ROW_GAP = 6
+
+// maxW: the pixels the band may take, or null when the surface does not say. When the items do not fit,
+// the "overflow" setting decides: compact them first, or wrap them onto more rows.
+function buildSvg(now, maxW) {
+  applyTheme()
+  const gap = itemGap()
+  const rowWidth = (list) => list.reduce((sum, p, i) => sum + p.w + (i ? gap : 0), 0)
+  let items = buildItems(now)
+  if (maxW && rowWidth(items) > maxW && choice('overflow', 'wrap') === 'compact' && !isCompact()) {
+    forced = { layout: 'compact' }
+    try {
+      items = buildItems(now)
+    } finally {
+      forced = {}
+    }
+  }
+  const rows = [[]]
+  for (const p of items) {
+    const current = rows[rows.length - 1]
+    if (maxW && current.length && rowWidth(current) + gap + p.w > maxW) rows.push([p])
+    else current.push(p)
+  }
+  let body = ''
+  let w = 1
+  rows.forEach((list, r) => {
+    let x = 0
+    list.forEach((p) => {
+      body += '<g transform="translate(' + x + ' ' + r * (PILL_H + ROW_GAP) + ')">' + p.svg + '</g>'
+      x += p.w + gap
+    })
+    w = Math.max(w, Math.ceil(x - gap))
+  })
+  const h = rows.length * PILL_H + (rows.length - 1) * ROW_GAP
   return {
     w,
-    source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + PILL_H +
-      '" viewBox="0 2 ' + w + ' ' + PILL_H + '">' + parts.join('') + '</svg>',
+    h,
+    source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h +
+      '" viewBox="0 2 ' + w + ' ' + h + '">' + body + '</svg>',
   }
 }
 
@@ -987,8 +1021,10 @@ export function register(on, options) {
     if (e.surface === 'terminal' || !els.Svg) {
       row = els.Text({ dimColor: true, wrap: 'truncate', children: [line] })
     } else {
-      const svg = buildSvg(now)
-      row = els.Svg({ source: svg.source, alt: line, width: svg.w, height: PILL_H })
+      // pixels the band may take; the gear button and padding are left out. Unknown on surfaces that do not say.
+      const maxW = narrowColumns !== null ? narrowColumns * CW - (flag('showOptionsButton', true) ? 56 : 12) : null
+      const svg = buildSvg(now, maxW)
+      row = els.Svg({ source: svg.source, alt: line, width: svg.w, height: svg.h })
     }
     if (flag('showOptionsButton', true)) {
       const gear = els.Button({

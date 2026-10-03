@@ -6,6 +6,7 @@
   "description": "Pill-style band above the prompt: plan limits, context window, git branch and more, each switchable. Options: /usage-meter-options",
   "userConfig": {
     "style": { "type": "string", "title": "Style", "description": "Pills, glass, rings, thin bars, segments or stacked", "default": "pills", "options": ["pills", "glass", "rings", "bars", "segments", "stacked"] },
+    "overflow": { "type": "string", "title": "When the band is too wide", "description": "Wrap onto more rows, or switch to the compact layout", "default": "wrap", "options": ["wrap", "compact"] },
     "roundPills": { "type": "boolean", "title": "Fully rounded pills", "description": "Use fully rounded pills instead of rounded rectangles", "default": false },
     "lightTheme": { "type": "boolean", "title": "Light theme text", "description": "Dark text for light backgrounds", "default": false },
     "layout": { "type": "string", "title": "Layout", "description": "Full pills, compact (icon and percent only) or auto", "default": "full", "options": ["full", "compact", "auto"] },
