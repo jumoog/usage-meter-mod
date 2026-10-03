@@ -830,30 +830,53 @@ export function register(on, options) {
     }
 
     const isOpen = (g) => openGroups.includes(g)
+    // A one-line state of a section, shown on the right of its card header
+    const labelOf = (key) => {
+      const s = SETTINGS.find((x) => x.key === key)
+      const hit = s.choices.find((c) => c[0] === choice(key, s.def))
+      return hit ? hit[1] : ''
+    }
+    const names = (pairs) => pairs.filter(([key, name]) => flag(key, SETTINGS.find((x) => x.key === key).def)).map((p) => p[1])
+    const summaryOf = (g) => {
+      if (g === 0) return labelOf('style') + ' · ' + labelOf('layout')
+      if (g === 1) return names([['show5h', '5h'], ['show7d', '7d']]).join(' + ') || 'none'
+      if (g === 2) return flag('showContext', true) ? 'on' : 'off'
+      return names([['showGit', 'git'], ['showTokens', 'tokens'], ['showCost', 'cost']]).join(', ') || 'none'
+    }
+
+    // One card per section: a header row (click to open or close) and the options below it
     const sections = GROUPS.map((title, g) =>
       Box({
         flexDirection: 'column',
+        borderStyle: 'round',
+        borderDimColor: true,
+        paddingX: 2,
+        paddingY: 1,
         gap: 1,
         children: [
-          Button({
-            key: 'group:' + g,
-            label: (isOpen(g) ? '▾  ' : '▸  ') + title.toUpperCase(),
-            plain: true,
-            onPress: async () => {
-              openGroups = isOpen(g) ? openGroups.filter((n) => n !== g) : [...openGroups, g]
-              await $.store.set(OPEN_GROUPS_KEY, openGroups)
-              $.ui.invalidate('ui.render')
-            },
+          Box({
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+            children: [
+              Button({
+                key: 'group:' + g,
+                label: (isOpen(g) ? '▾  ' : '▸  ') + title,
+                plain: true,
+                onPress: async () => {
+                  openGroups = isOpen(g) ? openGroups.filter((n) => n !== g) : [...openGroups, g]
+                  await $.store.set(OPEN_GROUPS_KEY, openGroups)
+                  $.ui.invalidate('ui.render')
+                },
+              }),
+              Text({ dimColor: true, children: [summaryOf(g)] }),
+            ],
           }),
-          Text({ dimColor: true, children: ['─'.repeat(48)] }),
           ...(isOpen(g)
             ? [
-                Box({
-                  flexDirection: 'column',
-                  gap: 1,
-                  paddingLeft: 1,
-                  children: SETTINGS.filter((s) => s.group === g).map(row),
-                }),
+                Text({ dimColor: true, children: ['─'.repeat(44)] }),
+                Box({ flexDirection: 'column', gap: 1, children: SETTINGS.filter((s) => s.group === g).map(row) }),
               ]
             : []),
         ],
