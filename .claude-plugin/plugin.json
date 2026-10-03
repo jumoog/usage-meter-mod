@@ -5,7 +5,7 @@
   "homepage": "https://github.com/wellbrained/usage-meter-mod",
   "description": "Pill-style band above the prompt: plan limits, context window, git branch and more, each switchable. Options: /usage-meter-options",
   "userConfig": {
-    "style": { "type": "string", "title": "Style", "description": "Pills, or rings (a progress circle with the percent and time)", "default": "pills", "options": ["pills", "rings"] },
+    "style": { "type": "string", "title": "Style", "description": "Pills, glass, rings, thin bars, segments or stacked", "default": "pills", "options": ["pills", "glass", "rings", "bars", "segments", "stacked"] },
     "roundPills": { "type": "boolean", "title": "Fully rounded pills", "description": "Use fully rounded pills instead of rounded rectangles", "default": false },
     "lightTheme": { "type": "boolean", "title": "Light theme text", "description": "Dark text for light backgrounds", "default": false },
     "layout": { "type": "string", "title": "Layout", "description": "Full pills, compact (icon and percent only) or auto", "default": "full", "options": ["full", "compact", "auto"] },

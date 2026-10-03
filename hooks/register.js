@@ -51,9 +51,9 @@ const SETTINGS = [
   {
     group: 0, key: 'style', label: 'Style', def: 'pills',
     desc: 'How each item is drawn.',
-    choices: [['pills', 'Pills'], ['rings', 'Rings']],
+    choices: [['pills', 'Pills'], ['glass', 'Glass'], ['rings', 'Rings'], ['bars', 'Thin bars'], ['segments', 'Segments'], ['stacked', 'Stacked']],
   },
-  { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills style only.' },
+  { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills and Glass styles only.' },
   {
     group: 0, key: 'layout', label: 'Layout', def: 'full',
     desc: 'Compact shows only the icon and percent.',
@@ -284,13 +284,18 @@ function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 }
 
-function text(x, str, fill, bold) {
-  return '<text x="' + x + '" y="21" font-family="' + FONT + '" font-size="13" fill="' + fill + '"' +
+function text(x, str, fill, bold, y, size) {
+  return '<text x="' + x + '" y="' + (y || 21) + '" font-family="' + FONT + '" font-size="' + (size || 13) + '" fill="' + fill + '"' +
     (bold ? ' font-weight="700"' : '') + '>' + esc(str) + '</text>'
 }
 
 function pillBg(x, w, color) {
   const radius = flag('roundPills', false) ? PILL_H / 2 : PILL_RADIUS
+  if (choice('style', 'pills') === 'glass') {
+    return '<rect x="' + x + '" y="2" width="' + w + '" height="' + PILL_H + '" rx="' + radius + '" fill="' + color + '" fill-opacity="0.1"/>' +
+      '<rect x="' + x + '" y="2" width="' + w + '" height="' + PILL_H + '" rx="' + radius + '" fill="#fff" fill-opacity="0.07" stroke="#fff" stroke-opacity="0.2"/>' +
+      '<rect x="' + (x + 1) + '" y="3" width="' + (w - 2) + '" height="' + (PILL_H / 2 - 1) + '" rx="' + Math.max(0, radius - 1) + '" fill="#fff" fill-opacity="0.06"/>'
+  }
   return '<rect x="' + x + '" y="2" width="' + w + '" height="' + PILL_H + '" rx="' + radius +
     '" fill="' + color + '" fill-opacity="0.2" stroke="' + color + '" stroke-opacity="0.35"/>'
 }
@@ -318,8 +323,18 @@ const ICONS = {
 
 // ---- Rings style: a progress ring with the icon inside, then the percent and the time -------------
 
-const isRings = () => choice('style', 'pills') === 'rings'
-const itemGap = () => (isRings() ? 26 : 8)
+const styleName = () => choice('style', 'pills')
+// pills and glass keep a background shape; every other style draws bare items
+const isBare = () => ['rings', 'bars', 'segments', 'stacked'].includes(styleName())
+const ITEM_GAPS = { rings: 26, bars: 30, segments: 26, stacked: 28 }
+const itemGap = () => ITEM_GAPS[styleName()] || 8
+
+// Shared by the bare styles: the state color (alert) and the label/detail text of an item
+function itemState(o) {
+  if (o.pct === null) return null
+  if (o.warn) return RED
+  return flag('alertColors', true) ? stateColor(o.pct, o.marker) : null
+}
 
 function ringItem(x, o) {
   const R = 12
@@ -372,10 +387,88 @@ function ringStat(x, icon, color, str) {
   const w = 16 + 8 + str.length * CW
   return { w, svg: ICONS[icon](x, color) + text(x + 24, str, TEXT) }
 }
+// ---- Bars, segments and stacked: bare items without a background shape -------------------------
+
+// "5h · 4h 3m": the label and the reset time / token count, as small muted text
+const detailOf = (o) => o.label + (o.tail ? ' · ' + o.tail : '')
+
+function thinBarItem(x, o) {
+  const compact = isCompact()
+  if (o.pct === null) return { w: (o.label.length + 2) * CW, svg: text(x, o.label + ' –', MUTED, false, 16) }
+  const state = itemState(o)
+  const accent = state || o.color
+  const pctStr = o.pct + '%'
+  const head = text(x, pctStr, state || TEXT, true, 16, 14)
+  const detail = compact ? '' : detailOf(o)
+  const textW = pctStr.length * 8.4 + (detail ? 8 + detail.length * CW : 0)
+  let body = head + (detail ? text(x + pctStr.length * 8.4 + 8, detail, MUTED, false, 16) : '')
+  if (compact) return { w: textW, svg: body }
+  const W = Math.max(150, textW)
+  body += '<rect x="' + x + '" y="21" width="' + W + '" height="4" rx="2" fill="' + TEXT + '" fill-opacity="0.14"/>'
+  body += '<rect x="' + x + '" y="21" width="' + Math.max(4, (W * Math.min(100, o.pct)) / 100) + '" height="4" rx="2" fill="' + accent + '"/>'
+  if (o.marker !== null && o.marker !== undefined) {
+    body += '<rect x="' + (x + W * o.marker - 1) + '" y="18" width="2" height="10" rx="1" fill="' + TEXT + '"/>'
+  }
+  return { w: W, svg: body }
+}
+
+function segmentItem(x, o) {
+  const compact = isCompact()
+  let cx = x
+  let body = text(cx, o.label, MUTED)
+  cx += o.label.length * CW + 8
+  if (o.pct === null) return { w: cx + CW - x, svg: body + text(cx, '–', MUTED) }
+  const state = itemState(o)
+  const accent = state || o.color
+  if (!compact) {
+    const lit = o.pct > 0 ? Math.max(1, Math.round(o.pct / 10)) : 0
+    for (let i = 0; i < 10; i++) {
+      body += '<rect x="' + (cx + i * 9) + '" y="10" width="7" height="14" rx="2" fill="' + (i < lit ? accent : TEXT) +
+        '"' + (i < lit ? '' : ' fill-opacity="0.14"') + '/>'
+    }
+    if (o.marker !== null && o.marker !== undefined) {
+      body += '<rect x="' + (cx + o.marker * 89 - 1) + '" y="7" width="2" height="20" rx="1" fill="' + TEXT + '"/>'
+    }
+    cx += 89 + 10
+  }
+  const pctStr = o.pct + '%'
+  body += text(cx, pctStr, state || TEXT, true)
+  cx += pctStr.length * CW
+  if (!compact && o.tail) {
+    cx += 8
+    body += text(cx, o.tail, MUTED)
+    cx += o.tail.length * CW
+  }
+  return { w: cx - x, svg: body }
+}
+
+function stackedItem(x, o) {
+  const compact = isCompact()
+  const bar = (color) => '<rect x="' + x + '" y="5" width="3" height="24" rx="1.5" fill="' + color + '"/>'
+  const tx = x + 11
+  if (o.pct === null) return { w: 11 + (o.label.length + 2) * CW, svg: bar(o.color) + text(tx, o.label + ' –', MUTED) }
+  const state = itemState(o)
+  const pctStr = o.pct + '%'
+  if (compact) {
+    return { w: 11 + pctStr.length * 8.4, svg: bar(state || o.color) + text(tx, pctStr, state || TEXT, true, 21, 14) }
+  }
+  const second = o.tail || ''
+  const line1W = o.label.length * 7.2 + 6 + pctStr.length * 9
+  const line2W = second.length * 7.2
+  let body = bar(state || o.color)
+  body += text(tx, o.label, o.color, false, 15, 12)
+  body += text(tx + o.label.length * 7.2 + 6, pctStr, state || TEXT, true, 15, 15)
+  if (second) body += text(tx, second, MUTED, false, 28, 12)
+  return { w: 11 + Math.max(line1W, line2W), svg: body }
+}
 // A pill with a bar: icon, label, bar (optional pace marker), percent, optional "| icon tail".
 // Compact layout keeps only the icon and the percent. `warn` forces the alert color.
 function barPill(x, o) {
-  if (isRings()) return ringItem(x, o)
+  const style = styleName()
+  if (style === 'rings') return ringItem(x, o)
+  if (style === 'bars') return thinBarItem(x, o)
+  if (style === 'segments') return segmentItem(x, o)
+  if (style === 'stacked') return stackedItem(x, o)
   const BAR = 76
   const compact = isCompact()
   let cx = x + 14
@@ -455,7 +548,7 @@ function contextPill(x) {
 }
 
 function statPill(x, icon, color, str) {
-  if (isRings()) return ringStat(x, icon, color, str)
+  if (isBare()) return ringStat(x, icon, color, str)
   const w = 14 + 16 + 8 + str.length * CW + 14
   return { w, svg: pillBg(x, w, color) + ICONS[icon](x + 14, color) + text(x + 14 + 24, str, TEXT) }
 }
