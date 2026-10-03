@@ -12,7 +12,7 @@
       "name": "usage-meter-pills",
       "source": "./",
       "description": "Pill-style band above the prompt: 5-hour and weekly plan limits with pace marker and reset time, context window, git branch, optional tokens and cost. Options: /usage-meter-options",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "monitoring",
       "keywords": ["usage", "limits", "context", "git", "statusline", "desktop"],
       "homepage": "https://github.com/wellbrained/usage-meter-mod",
