@@ -60,7 +60,7 @@ const SETTINGS = [
   { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills and Glass styles only.' },
   {
     group: 0, key: 'layout', label: 'Layout', def: 'full',
-    desc: 'Compact shows only the icon and percent.',
+    desc: 'Compact shows only the icon and percent. Auto uses full and switches to compact only when it would not fit.',
     choices: [['full', 'Full'], ['compact', 'Compact'], ['auto', 'Auto']],
   },
   { group: 0, key: 'lightTheme', label: 'Light theme text', def: false, desc: 'Dark text for light backgrounds.' },
@@ -155,7 +155,7 @@ let barW = 76
 function isCompact() {
   const layout = choice('layout', 'full')
   if (layout === 'compact') return true
-  if (layout === 'auto') return narrowColumns !== null && narrowColumns < 100
+  // auto starts full; buildSvg switches it to compact only when the full band would not fit
   return false
 }
 
@@ -608,7 +608,7 @@ function buildSvg(now, maxW) {
   try {
     barW = 76
     items = build()
-    if (maxW && rowWidth(items) > maxW && choice('overflow', 'wrap') === 'compact' && !isCompact()) {
+    if (maxW && rowWidth(items) > maxW && (choice('overflow', 'wrap') === 'compact' || choice('layout', 'full') === 'auto') && !isCompact()) {
       compactForced = true
       items = build()
     }
@@ -661,7 +661,8 @@ function buildSvg(now, maxW) {
 
 // Terminal and anything without Svg
 function textLine(now) {
-  const compact = isCompact()
+  // the text line is short, so auto only turns compact on a really narrow surface
+  const compact = isCompact() || (choice('layout', 'full') === 'auto' && narrowColumns !== null && narrowColumns < 70)
   const seg = (kind, label) => {
     const r = readings[kind]
     const resetMs = r ? toMs(r.resetsAt) : null
