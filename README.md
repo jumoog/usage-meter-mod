@@ -1,4 +1,4 @@
-﻿# Usage Meter Pills
+# Usage Meter Pills
 
 A pill-style band above the Claude Code prompt (desktop app) that shows your plan usage at a glance.
 
@@ -12,7 +12,13 @@ A pill-style band above the Claude Code prompt (desktop app) that shows your pla
 
 ## Install
 
-Load it for one run:
+From the marketplace in this repo:
+
+```text
+/plugin marketplace add wellbrained/usage-meter-mod
+/plugin install usage-meter-pills@usage-meter-mod
+```n
+Or load a local copy for one run:
 
 ```bash
 claude --plugin-dir "D:\Github\usage-meter-pills"
