@@ -605,18 +605,30 @@ function buildSvg(now, maxW) {
   }
   let body = ''
   let w = 1
+  const rowSvgs = []
   rows.forEach((list, r) => {
     let x = 0
+    let rowBody = ''
     list.forEach((p) => {
       body += '<g transform="translate(' + x + ' ' + r * (PILL_H + ROW_GAP) + ')">' + p.svg + '</g>'
+      rowBody += '<g transform="translate(' + x + ' 0)">' + p.svg + '</g>'
       x += p.w + gap
     })
-    w = Math.max(w, Math.ceil(x - gap))
+    const rw = Math.max(1, Math.ceil(x - gap))
+    w = Math.max(w, rw)
+    // each row also as its own image, so the settings button can sit after the last item
+    const rh = PILL_H + (r < rows.length - 1 ? ROW_GAP : 0)
+    rowSvgs.push({
+      w: rw,
+      h: rh,
+      source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + rw + '" height="' + rh + '" viewBox="0 2 ' + rw + ' ' + rh + '">' + rowBody + '</svg>',
+    })
   })
   const h = rows.length * PILL_H + (rows.length - 1) * ROW_GAP
   return {
     w,
     h,
+    rows: rowSvgs,
     source: '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h +
       '" viewBox="0 2 ' + w + ' ' + h + '">' + body + '</svg>',
   }
@@ -1017,24 +1029,24 @@ export function register(on, options) {
     const now = Date.now()
     const line = textLine(now)
     if (!line) return others
-    let row
+    const gear = flag('showOptionsButton', true)
+      ? els.Button({ key: 'open-options', label: ' ⚙️ ', plain: true, onPress: () => openOptions($) })
+      : null
+    // the rows of the band, top to bottom; the settings button always sits after the last item
+    const rows = []
     if (e.surface === 'terminal' || !els.Svg) {
-      row = els.Text({ dimColor: true, wrap: 'truncate', children: [line] })
+      rows.push([els.Text({ dimColor: true, wrap: 'truncate', children: [line] })])
     } else {
-      // pixels the band may take; the gear button and padding are left out. Unknown on surfaces that do not say.
-      const maxW = narrowColumns !== null ? narrowColumns * CW - (flag('showOptionsButton', true) ? 56 : 12) : null
+      // pixels the band may take, leaving room for the gear; unknown on surfaces that do not say
+      const maxW = narrowColumns !== null ? narrowColumns * CW - (gear ? 56 : 12) : null
       const svg = buildSvg(now, maxW)
-      row = els.Svg({ source: svg.source, alt: line, width: svg.w, height: svg.h })
+      for (const r of svg.rows) rows.push([els.Svg({ source: r.source, alt: line, width: r.w, height: r.h })])
     }
-    if (flag('showOptionsButton', true)) {
-      const gear = els.Button({
-        key: 'open-options',
-        label: ' ⚙️ ',
-        plain: true,
-        onPress: () => openOptions($),
-      })
-      row = els.Box({ flexDirection: 'row', alignItems: 'center', columnGap: 1, children: [row, gear] })
-    }
+    if (gear) rows[rows.length - 1].push(gear)
+    const band = rows.map((cells) =>
+      els.Box({ flexDirection: 'row', alignItems: 'center', columnGap: 1, children: cells }),
+    )
+    const row = band.length === 1 ? band[0] : els.Box({ flexDirection: 'column', children: band })
     return others ? els.Box({ flexDirection: 'column', children: [row, others] }) : row
   })
 }
