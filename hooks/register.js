@@ -46,7 +46,7 @@ const COLOR_CHOICES = PALETTE.map(([id, name]) => [id, name])
 
 // Everything the settings pane lists, in groups. To add an option, theme or color: add an entry here
 // (a `choices` entry shows all its values side by side) and a sample in previewFor().
-const GROUPS = ['Appearance', 'Usage limits', 'Context window', 'Extras']
+const GROUPS = ['Style', 'Usage limits', 'Context window', 'Extras']
 const SETTINGS = [
   {
     group: 0, key: 'style', label: 'Style', def: 'pills',
@@ -60,7 +60,7 @@ const SETTINGS = [
     choices: [['full', 'Full'], ['compact', 'Compact'], ['auto', 'Auto']],
   },
   { group: 0, key: 'lightTheme', label: 'Light theme text', def: false, desc: 'Dark text for light backgrounds.' },
-  { group: 0, key: 'showOptionsButton', label: 'Settings button next to the band', def: true },
+  { group: 3, key: 'showOptionsButton', label: 'Settings button next to the band', def: true },
   { group: 1, key: 'show5h', label: '5-hour limit', def: true },
   { group: 1, key: 'show7d', label: 'Weekly limit', def: true },
   { group: 1, key: 'showResetTime', label: 'Reset time', def: true },
@@ -89,6 +89,9 @@ let toggles = {}
 let forced = {}
 // Color edits in the settings pane show live but are only kept on Save; Cancel returns to the last saved colors.
 // Every other option is kept as soon as it is changed.
+// Which settings sections are expanded (group numbers); only Style by default, remembered per user
+let openGroups = [0]
+const OPEN_GROUPS_KEY = 'open-groups'
 let committedColors = {}
 let isDirty = false
 
@@ -700,6 +703,8 @@ export function register(on, options) {
       committedColors = pickColors(toggles)
     }
     await $.command.register({ name: 'usage-meter-options', description: 'Choose which pills the usage band shows' })
+    const savedOpen = await $.store.get(OPEN_GROUPS_KEY)
+    if (Array.isArray(savedOpen)) openGroups = savedOpen.filter((n) => Number.isInteger(n))
     const savedTotals = await $.store.get(TOTALS_KEY)
     if (savedTotals && typeof savedTotals === 'object') totals = savedTotals
     await refresh($)
@@ -824,19 +829,33 @@ export function register(on, options) {
       })
     }
 
+    const isOpen = (g) => openGroups.includes(g)
     const sections = GROUPS.map((title, g) =>
       Box({
         flexDirection: 'column',
         gap: 1,
         children: [
-          Text({ bold: true, children: [title.toUpperCase()] }),
-          Text({ dimColor: true, children: ['─'.repeat(48)] }),
-          Box({
-            flexDirection: 'column',
-            gap: 1,
-            paddingLeft: 1,
-            children: SETTINGS.filter((s) => s.group === g).map(row),
+          Button({
+            key: 'group:' + g,
+            label: (isOpen(g) ? '▾  ' : '▸  ') + title.toUpperCase(),
+            plain: true,
+            onPress: async () => {
+              openGroups = isOpen(g) ? openGroups.filter((n) => n !== g) : [...openGroups, g]
+              await $.store.set(OPEN_GROUPS_KEY, openGroups)
+              $.ui.invalidate('ui.render')
+            },
           }),
+          Text({ dimColor: true, children: ['─'.repeat(48)] }),
+          ...(isOpen(g)
+            ? [
+                Box({
+                  flexDirection: 'column',
+                  gap: 1,
+                  paddingLeft: 1,
+                  children: SETTINGS.filter((s) => s.group === g).map(row),
+                }),
+              ]
+            : []),
         ],
       }),
     )
@@ -887,7 +906,7 @@ export function register(on, options) {
           flexDirection: 'column',
           children: [
             Text({ bold: true, children: ['Usage meter'] }),
-            Text({ dimColor: true, children: ['Pick an option to change it. Everything applies right away; only colors need Save.'] }),
+            Text({ dimColor: true, children: ['Click a section to open or close it. Everything applies right away; only colors need Save.'] }),
           ],
         }),
         ...saveBar,
