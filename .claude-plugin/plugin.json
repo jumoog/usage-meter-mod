@@ -1,6 +1,8 @@
 {
   "name": "usage-meter-pills",
   "version": "0.3.0",
+  "author": { "name": "wellbrained", "url": "https://github.com/wellbrained" },
+  "homepage": "https://github.com/wellbrained/usage-meter-mod",
   "description": "Pill-style band above the prompt: plan limits, context window, git branch and more, each switchable. Options: /usage-meter-options",
   "userConfig": {
     "style": { "type": "string", "title": "Style", "description": "Pills, or rings (a progress circle with the percent and time)", "default": "pills", "options": ["pills", "rings"] },
