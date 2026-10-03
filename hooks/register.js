@@ -40,40 +40,41 @@ const PALETTE = [
   ['pink', 'Pink', '#e060a8'],
   ['teal', 'Teal', '#2fb5c8'],
   ['gray', 'Gray', '#8a8f98'],
-  ['custom', 'Custom (type a hex color)', '#3fb58a'],
+  ['custom', 'Custom', '#3fb58a'],
 ]
 const COLOR_CHOICES = PALETTE.map(([id, name]) => [id, name])
 
-// Everything the settings pane lists, in groups. A `choices` entry cycles through its values on a press.
+// Everything the settings pane lists, in groups. To add an option, theme or color: add an entry here
+// (a `choices` entry shows all its values side by side) and a sample in previewFor().
 const GROUPS = ['Appearance', 'Usage limits', 'Context window', 'Extras']
 const SETTINGS = [
-  { group: 0, key: 'style', label: 'Style', def: 'pills', choices: [['pills', 'Pills'], ['rings', 'Rings (progress circle)']] },
-  { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false },
-  { group: 0, key: 'lightTheme', label: 'Light theme text', def: false },
   {
-    group: 0,
-    key: 'layout',
-    label: 'Layout',
-    def: 'full',
-    choices: [['full', 'Full'], ['compact', 'Compact'], ['auto', 'Auto (compact when narrow)']],
+    group: 0, key: 'style', label: 'Style', def: 'pills',
+    desc: 'How each item is drawn.',
+    choices: [['pills', 'Pills'], ['rings', 'Rings']],
   },
+  { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false, desc: 'Pills style only.' },
+  {
+    group: 0, key: 'layout', label: 'Layout', def: 'full',
+    desc: 'Compact shows only the icon and percent.',
+    choices: [['full', 'Full'], ['compact', 'Compact'], ['auto', 'Auto']],
+  },
+  { group: 0, key: 'lightTheme', label: 'Light theme text', def: false, desc: 'Dark text for light backgrounds.' },
   { group: 0, key: 'showOptionsButton', label: 'Settings button next to the band', def: true },
   { group: 1, key: 'show5h', label: '5-hour limit', def: true },
   { group: 1, key: 'show7d', label: 'Weekly limit', def: true },
   { group: 1, key: 'showResetTime', label: 'Reset time', def: true },
   {
-    group: 1,
-    key: 'resetFormat',
-    label: 'Reset format',
-    def: 'countdown',
-    choices: [['countdown', 'Countdown (4h 25m)'], ['clock', 'Clock time (17:40)']],
+    group: 1, key: 'resetFormat', label: 'Reset format', def: 'countdown',
+    desc: 'Countdown looks like 4h 25m, clock time like 17:40.',
+    choices: [['countdown', 'Countdown'], ['clock', 'Clock time']],
   },
-  { group: 1, key: 'showPaceMarker', label: 'Pace marker', def: true },
-  { group: 1, key: 'alertColors', label: 'Alert colors when burning too fast', def: true },
+  { group: 1, key: 'showPaceMarker', label: 'Pace marker', def: true, desc: 'Marks how far through the window you are.' },
+  { group: 1, key: 'alertColors', label: 'Alert colors', def: true, desc: 'Amber or red when you use a limit faster than time passes.' },
   { group: 1, key: 'colorFiveHour', label: '5-hour color', def: 'green', choices: COLOR_CHOICES },
   { group: 1, key: 'colorSevenDay', label: 'Weekly color', def: 'purple', choices: COLOR_CHOICES },
   { group: 2, key: 'showContext', label: 'Context window', def: true },
-  { group: 2, key: 'warnContext', label: 'Context warning near full', def: true },
+  { group: 2, key: 'warnContext', label: 'Context warning', def: true, desc: 'Turns red near full and says compact soon.' },
   { group: 2, key: 'colorContext', label: 'Context color', def: 'blue', choices: COLOR_CHOICES },
   { group: 3, key: 'showGit', label: 'Git branch', def: true },
   { group: 3, key: 'showTokens', label: 'Session tokens', def: false },
@@ -636,122 +637,168 @@ export function register(on, options) {
     return { text: 'Usage pills settings opened.' }
   })
 
-  // The settings list: a press flips a checkbox or steps a choice to its next value
+  // The settings pane. Everything is driven by SETTINGS/GROUPS, so a new option, theme or color
+  // only needs an entry there (and a sample in previewFor).
+  //  - a checkbox row: a press flips it
+  //  - a choice row: every value is shown side by side, the selected one highlighted; a press selects it
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     applyTheme()
-    const { Box, Text, Button, Svg } = $.ui.resolve(e)
+    const { Box, Text, Button, Svg, Input } = $.ui.resolve(e)
     const now = Date.now()
-    // One row per option: the control on the left, a sample of its pill on the right
-    const rows = SETTINGS.map((s) => {
-      const isChoice = Array.isArray(s.choices)
-      const current = isChoice ? choice(s.key, s.def) : flag(s.key, s.def)
-      let label
-      if (isChoice) {
-        const hit = s.choices.find((c) => c[0] === current) || s.choices[0]
-        label = '▸  ' + s.label + ': ' + hit[1]
-      } else {
-        label = (current ? '✅  ' : '⬜  ') + s.label
-      }
-      const button = Button({
-        key: s.key,
-        label,
-        plain: true,
-        onPress: async () => {
-          if (isChoice) {
-            const at = s.choices.findIndex((c) => c[0] === choice(s.key, s.def))
-            toggles = { ...toggles, [s.key]: s.choices[(at + 1) % s.choices.length][0] }
-          } else {
-            toggles = { ...toggles, [s.key]: !flag(s.key, s.def) }
-          }
-          if (isColorKey(s.key)) isDirty = true
-          else await persistToggles($)
-          if (s.key === 'showGit') await refreshGit($)
-          $.ui.invalidate('ui.render')
-        },
-      })
-      const isOn = isChoice ? true : current
+
+    const change = (s, value) => async () => {
+      toggles = { ...toggles, [s.key]: value }
+      if (isColorKey(s.key)) isDirty = true
+      else await persistToggles($)
+      if (s.key === 'showGit') await refreshGit($)
+      $.ui.invalidate('ui.render')
+    }
+
+    // A small picture of what the option does, right-aligned
+    const sampleFor = (s, isOn) => {
       const sample = Svg ? previewFor(s.key, isOn, now) : null
-      let right = Text({ children: [s.key === 'showOptionsButton' ? '⚙' : ''] })
-      if (sample) {
-        const sampleW = Number(sample.match(/width="([\d.]+)"/)[1])
-        right = Svg({ source: sample, alt: s.label, width: sampleW, height: PILL_H })
+      if (!sample) return Text({ children: [''] })
+      const w = Number(sample.match(/width="([\d.]+)"/)[1])
+      return Svg({ source: sample, alt: s.label, width: w, height: PILL_H })
+    }
+
+    const hint = (s) => (s.desc ? Text({ dimColor: true, children: [s.desc] }) : null)
+
+    const row = (s) => {
+      if (Array.isArray(s.choices)) {
+        const current = choice(s.key, s.def)
+        const parts = [
+          Box({
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+            children: [Text({ bold: true, children: [s.label] }), sampleFor(s, true)],
+          }),
+          hint(s),
+          Box({
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            columnGap: 1,
+            rowGap: 1,
+            children: s.choices.map(([value, name]) =>
+              Button({
+                key: s.key + ':' + value,
+                label: name,
+                variant: value === current ? 'primary' : 'secondary',
+                onPress: change(s, value),
+              }),
+            ),
+          }),
+        ]
+        if (isColorKey(s.key) && current === 'custom') {
+          const hexKey = s.key + 'Hex'
+          parts.push(
+            Input({
+              key: hexKey,
+              label: 'Hex color  ',
+              placeholder: '#RRGGBB',
+              value: choice(hexKey, ''),
+              submitLabel: 'apply',
+              onSubmit: async (value) => {
+                const hex = ('#' + String(value).trim().replace(/^#/, '')).toLowerCase()
+                if (!/^#[0-9a-f]{6}$/.test(hex)) return
+                toggles = { ...toggles, [hexKey]: hex }
+                isDirty = true
+                $.ui.invalidate('ui.render')
+              },
+            }),
+          )
+        }
+        return Box({ flexDirection: 'column', gap: 1, children: parts.filter(Boolean) })
       }
-      const line = Box({
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        width: '100%',
-        children: [button, right],
+      const isOn = flag(s.key, s.def)
+      return Box({
+        flexDirection: 'column',
+        children: [
+          Box({
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+            children: [
+              Button({ key: s.key, label: (isOn ? '✅  ' : '⬜  ') + s.label, plain: true, onPress: change(s, !isOn) }),
+              sampleFor(s, isOn),
+            ],
+          }),
+          hint(s),
+        ].filter(Boolean),
       })
-      if (isChoice && s.key.startsWith('color') && current === 'custom') {
-        const hexKey = s.key + 'Hex'
-        const field = $.ui.resolve(e).Input({
-          key: hexKey,
-          label: '      Hex color: ',
-          placeholder: '#RRGGBB',
-          value: choice(hexKey, ''),
-          submitLabel: 'save',
-          onSubmit: async (value) => {
-            const hex = ('#' + String(value).trim().replace(/^#/, '')).toLowerCase()
-            if (!/^#[0-9a-f]{6}$/.test(hex)) return
-            toggles = { ...toggles, [hexKey]: hex }
-            isDirty = true
-            $.ui.invalidate('ui.render')
-          },
-        })
-        return Box({ flexDirection: 'column', children: [line, field] })
-      }
-      return line
-    })
+    }
+
     const sections = GROUPS.map((title, g) =>
       Box({
         flexDirection: 'column',
         gap: 1,
         children: [
           Text({ bold: true, children: [title.toUpperCase()] }),
-          ...SETTINGS.map((s, i) => (s.group === g ? rows[i] : null)).filter(Boolean),
+          Text({ dimColor: true, children: ['─'.repeat(48)] }),
+          Box({
+            flexDirection: 'column',
+            gap: 1,
+            paddingLeft: 1,
+            children: SETTINGS.filter((s) => s.group === g).map(row),
+          }),
         ],
       }),
     )
+
+    const saveBar = isDirty
+      ? [
+          Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            alignItems: 'center',
+            children: [
+              Button({
+                key: 'save',
+                label: 'Save colors',
+                variant: 'primary',
+                onPress: async () => {
+                  committedColors = pickColors(toggles)
+                  await $.store.set(TOGGLES_KEY, toggles)
+                  isDirty = false
+                  $.ui.toast('Colors saved')
+                  $.ui.invalidate('ui.render')
+                },
+              }),
+              Button({
+                key: 'cancel',
+                label: 'Cancel',
+                variant: 'secondary',
+                onPress: async () => {
+                  const keep = {}
+                  for (const k of Object.keys(toggles)) if (!isColorKey(k)) keep[k] = toggles[k]
+                  toggles = { ...keep, ...committedColors }
+                  isDirty = false
+                  $.ui.invalidate('ui.render')
+                },
+              }),
+              Text({ dimColor: true, children: ['Color changes are not saved yet'] }),
+            ],
+          }),
+        ]
+      : []
+
     return Box({
       flexDirection: 'column',
       gap: 2,
       paddingY: 1,
       children: [
-        Text({ dimColor: true, children: ['Click an option to change it. Color changes show right away; Save keeps them, Cancel undoes them.'] }),
-        ...sections,
-        ...(isDirty ? [Box({
-          flexDirection: 'row',
-          columnGap: 2,
-          alignItems: 'center',
+        Box({
+          flexDirection: 'column',
           children: [
-            Button({
-              key: 'save',
-              label: 'Save',
-              variant: 'primary',
-              onPress: async () => {
-                committedColors = pickColors(toggles)
-                await $.store.set(TOGGLES_KEY, toggles)
-                isDirty = false
-                $.ui.toast('Colors saved')
-                $.ui.invalidate('ui.render')
-              },
-            }),
-            Button({
-              key: 'cancel',
-              label: 'Cancel',
-              variant: 'secondary',
-              onPress: async () => {
-                const keep = {}
-                for (const k of Object.keys(toggles)) if (!isColorKey(k)) keep[k] = toggles[k]
-                toggles = { ...keep, ...committedColors }
-                isDirty = false
-                $.ui.invalidate('ui.render')
-              },
-            }),
-            Text({ dimColor: true, children: ['Color changes are not saved yet'] }),
+            Text({ bold: true, children: ['Usage meter'] }),
+            Text({ dimColor: true, children: ['Pick an option to change it. Everything applies right away; only colors need Save.'] }),
           ],
-        })] : []),
+        }),
+        ...saveBar,
+        ...sections,
       ],
     })
   })
