@@ -1,0 +1,63 @@
+name: Bump version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# One bump per push. The bump commit is pushed with GITHUB_TOKEN, which never
+# triggers workflows, so this cannot retrigger itself. [skip ci] in its message
+# also keeps any other workflow from running on it.
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Bump version and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Start from the newest main on every attempt, so a push that lands
+          # meanwhile (by a person or a parallel run) is bumped on top of, not lost
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+            version=$(node <<'EOF'
+          const fs = require('fs');
+          const files = ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json'];
+          const old = JSON.parse(fs.readFileSync(files[0], 'utf8')).version;
+          const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.*?)(\d+))?$/.exec(old);
+          if (!m || (m[4] !== undefined && m[5] === undefined)) {
+            console.error(`Cannot bump version "${old}"`);
+            process.exit(1);
+          }
+          // 0.3.0 -> 0.3.1, 0.4.0-beta.1 -> 0.4.0-beta.2
+          const next = m[4] !== undefined
+            ? `${m[1]}.${m[2]}.${m[3]}-${m[4]}${+m[5] + 1}`
+            : `${m[1]}.${m[2]}.${+m[3] + 1}`;
+          // Edit the text rather than re-serializing, so the hand-written layout stays;
+          // the first "version" is plugin.json's top level and marketplace.json's plugin entry
+          for (const f of files) {
+            const text = fs.readFileSync(f, 'utf8').replace(/("version"\s*:\s*")[^"]*(")/, `$1${next}$2`);
+            const json = JSON.parse(text);
+            if ((json.plugins ? json.plugins[0] : json).version !== next) {
+              console.error(`Version not updated in ${f}`);
+              process.exit(1);
+            }
+            fs.writeFileSync(f, text);
+          }
+          console.log(next);
+          EOF
+            )
+            git commit -am "Bump version to $version [skip ci]"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "Could not push the version bump" >&2
+          exit 1
