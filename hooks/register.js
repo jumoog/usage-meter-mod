@@ -49,7 +49,7 @@ const COLOR_CHOICES = PALETTE.map(([id, name]) => [id, name])
 const GROUPS = ['Style', 'Usage limits', 'Context window', 'Extras']
 const SETTINGS = [
   {
-    group: 0, key: 'style', label: 'Style', def: 'pills',
+    group: 0, key: 'style', label: 'Design', def: 'pills',
     desc: 'How each item is drawn.',
     choices: [['pills', 'Pills'], ['glass', 'Glass'], ['rings', 'Rings'], ['bars', 'Thin bars'], ['segments', 'Segments'], ['stacked', 'Stacked']],
   },
@@ -820,7 +820,7 @@ export function register(on, options) {
             alignItems: 'center',
             width: '100%',
             children: [
-              Button({ key: s.key, label: (isOn ? '✅  ' : '⬜  ') + s.label, plain: true, onPress: change(s, !isOn) }),
+              Button({ key: s.key, label: (isOn ? '✅  ' : '◻  ') + s.label, plain: true, onPress: change(s, !isOn) }),
               sampleFor(s, isOn),
             ],
           }),
@@ -844,6 +844,19 @@ export function register(on, options) {
       return names([['showGit', 'git'], ['showTokens', 'tokens'], ['showCost', 'cost']]).join(', ') || 'none'
     }
 
+    // A short rounded bar in the section's color under the card header, in place of a full-width rule
+    const BAR_COLORS = ['#5b7cf0', '#3fb58a', '#8b6cf0', '#e8845a']
+    const accentBar = (g) =>
+      Svg
+        ? Svg({
+            source: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="3" viewBox="0 0 36 3"><rect width="36" height="3" rx="1.5" fill="' +
+              BAR_COLORS[g % BAR_COLORS.length] + '"/></svg>',
+            alt: ' ',
+            width: 36,
+            height: 3,
+          })
+        : Text({ dimColor: true, children: ['───'] })
+
     // One card per section: a header row (click to open or close) and the options below it
     const sections = GROUPS.map((title, g) =>
       Box({
@@ -852,7 +865,7 @@ export function register(on, options) {
         borderDimColor: true,
         paddingX: 2,
         paddingY: 1,
-        gap: 1,
+        gap: 2,
         children: [
           Box({
             flexDirection: 'row',
@@ -875,8 +888,8 @@ export function register(on, options) {
           }),
           ...(isOpen(g)
             ? [
-                Text({ dimColor: true, children: ['─'.repeat(44)] }),
-                Box({ flexDirection: 'column', gap: 1, children: SETTINGS.filter((s) => s.group === g).map(row) }),
+                accentBar(g),
+                Box({ flexDirection: 'column', gap: 2, children: SETTINGS.filter((s) => s.group === g).map(row) }),
               ]
             : []),
         ],
