@@ -5,6 +5,7 @@ A pill-style band above the Claude Code prompt (desktop app) that shows your pla
 - **5-hour and weekly limits** with a bar, a pace marker (how far through the window you are) and the reset time
 - **Context window** fill, with a warning near full
 - **Git branch**, with a dot when there are uncommitted changes
+- **Prompt cache** warm or cold, with how long it stays warm (1 hour or 5 minutes, set in the options), and an optional **keep-warm** that pings the cache shortly before it expires while you are idle, for up to 1 to 12 hours after the last turn (same approach as [cache-tax](https://github.com/karanb192/cache-tax)). Each ping reads the cached context and counts toward your plan usage, and it stops by itself if the cache was already gone
 - Optional **session tokens** and **cost**
 - Alert colors when you burn through a limit faster than time passes
 - Six styles: pills, glass, rings, thin bars, segments and stacked

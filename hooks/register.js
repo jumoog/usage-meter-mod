@@ -1,11 +1,12 @@
 // usage-meter-pills
 // Pills above the prompt: 5h / 7d limits with a pace marker and reset time, context window,
-// git branch, and optionally session tokens and cost. Desktop draws an SVG; the terminal gets text.
+// git branch, prompt cache warmth, and optionally session tokens and cost. Desktop draws an SVG; the terminal gets text.
 // /usage-meter-options opens the settings pane; the gear next to the band opens it too.
 
 const STORE_KEY = 'last-readings'
 const TOTALS_KEY = 'session-totals'
 const TOGGLES_KEY = 'toggles'
+const CACHE_KEY = 'cache-warmth'
 const PANE = 'pills-settings'
 const WINDOW_MS = { five_hour: 5 * 3600e3, seven_day: 7 * 86400e3 }
 
@@ -27,7 +28,15 @@ const COLORS = {
   down: '#3fa35b',
   cost: '#d4a017',
   git: '#e8845a',
+  warm: '#f07a3c',
+  cold: '#6aa8d8',
 }
+
+const CACHE_TTL_MS = { '5m': 5 * 60000, '1h': 3600e3 }
+// A keep-warm ping goes out this long before the cache would expire
+const PING_MARGIN_MS = { '5m': 60000, '1h': 10 * 60000 }
+const KEEP_WARM_MS = { '1h': 3600e3, '3h': 3 * 3600e3, '6h': 6 * 3600e3, '12h': 12 * 3600e3 }
+const PING_PROMPT = 'Reply with the single word: warm'
 
 // Accent colors a limit can use
 const PALETTE = [
@@ -81,6 +90,28 @@ const SETTINGS = [
   { group: 2, key: 'warnContext', label: 'Context warning', def: true, desc: 'Turns red near full and says compact soon.' },
   { group: 2, key: 'colorContext', label: 'Context color', def: 'blue', choices: COLOR_CHOICES },
   { group: 3, key: 'showGit', label: 'Git branch', def: true },
+  { group: 3, key: 'showCache', label: 'Prompt cache warm or cold', def: true },
+  {
+    group: 3,
+    key: 'cacheTtl',
+    label: 'Prompt cache lifetime',
+    def: '1h',
+    choices: [['1h', '1 hour'], ['5m', '5 minutes']],
+  },
+  {
+    group: 3,
+    key: 'keepWarm',
+    label: 'Keep the cache warm while idle',
+    def: false,
+    desc: 'Uses plan usage: while you are idle it sends a one-word request about every 50 minutes, each reading the cached context. Stops by itself after the chosen time.',
+  },
+  {
+    group: 3,
+    key: 'keepWarmFor',
+    label: 'Keep it warm for',
+    def: '6h',
+    choices: [['1h', '1 hour after the last turn'], ['3h', '3 hours after the last turn'], ['6h', '6 hours after the last turn'], ['12h', '12 hours after the last turn']],
+  },
   { group: 3, key: 'showTokens', label: 'Session tokens', def: false },
   { group: 3, key: 'showCost', label: 'Session cost', def: false },
 ]
@@ -164,6 +195,110 @@ let git = { branch: null, dirty: false }
 let readings = {}
 let totals = { startedAt: 0, input: 0, output: 0, cache: 0 }
 let costUsd = null
+// When the main thread last read or wrote the prompt cache (a keep-warm ping counts), when its
+// last real turn ended, and the session that was in. `busy` while a turn runs: its requests keep
+// the cache warm.
+let cache = { at: 0, turnAt: 0, startedAt: 0, busy: false, busyAt: 0 }
+// A turn that was interrupted raises no turn.complete, so "busy" only counts while responses keep arriving
+const BUSY_STALE_MS = 15 * 60000
+let sessionStartedAt = 0
+let cacheTimer = null
+// Keep-warm: a ping in flight, how many pings this session, and why pinging stopped until the next turn
+let keep = { pinging: false, pings: 0, stopped: null }
+
+function cacheTtlMs() {
+  return CACHE_TTL_MS[choice('cacheTtl', '1h')] || CACHE_TTL_MS['1h']
+}
+
+// Milliseconds the cache stays warm, 0 when cold; Infinity while a turn runs
+function cacheLeft(now) {
+  if (cache.busy && now - cache.busyAt < BUSY_STALE_MS) return Infinity
+  if (!cache.at) return 0
+  return Math.max(0, cache.at + cacheTtlMs() - now)
+}
+
+// "42m", rounded up so it reads "1m" until the moment it goes cold
+function formatCacheLeft(ms) {
+  const m = Math.ceil(ms / 60000)
+  return m >= 60 ? Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '') : m + 'm'
+}
+
+function cacheLabel(now) {
+  const left = cacheLeft(now)
+  if (left === Infinity) return 'warm'
+  return left > 0 ? formatCacheLeft(left) : 'cold'
+}
+
+// When keep-warm stops pinging: the window after the last real turn. 0 when it is off.
+function keepWarmUntil() {
+  if (!flag('keepWarm', false) || keep.stopped || !cache.turnAt) return 0
+  return cache.turnAt + (KEEP_WARM_MS[choice('keepWarmFor', '6h')] || KEEP_WARM_MS['6h'])
+}
+
+// Time left in the keep-warm window while it is holding a warm cache, else 0
+function keptLeft(now) {
+  const until = keepWarmUntil()
+  return until && cacheLeft(now) > 0 ? Math.max(0, until - now) : 0
+}
+
+// One timer: the next keep-warm ping when one is due inside the window, else a redraw the
+// moment the cache goes cold rather than at the next minute tick
+function armCache($) {
+  if (cacheTimer) cacheTimer.cancel()
+  cacheTimer = null
+  const now = Date.now()
+  const left = cacheLeft(now)
+  if (left <= 0 || left === Infinity) return
+  const ttl = choice('cacheTtl', '1h')
+  const pingAt = cache.at + cacheTtlMs() - (PING_MARGIN_MS[ttl] || PING_MARGIN_MS['1h'])
+  if (pingAt < keepWarmUntil()) {
+    cacheTimer = $.clock.after(Math.max(1000, pingAt - now), () => { void pingCache($) })
+  } else {
+    cacheTimer = $.clock.after(left + 250, () => $.ui.invalidate('ui.render'))
+  }
+}
+
+function stopKeepWarm($, why) {
+  keep.stopped = why
+  $.ui.toast('Keep-warm stopped: ' + why)
+  armCache($)
+  $.ui.invalidate('ui.render')
+}
+
+// A one-word fork of the main thread's own transcript: the API serves it from the cache, which
+// restarts the cache's clock. Same approach as cache-tax (github.com/karanb192/cache-tax, MIT).
+async function pingCache($) {
+  cacheTimer = null
+  if (keep.pinging || cache.busy) return
+  const now = Date.now()
+  if (now >= keepWarmUntil() || cacheLeft(now) <= 0) return armCache($)
+  keep.pinging = true
+  let reply
+  try {
+    reply = await $.model.fork({ prompt: PING_PROMPT })
+  } catch (err) {
+    reply = { isAnswered: false, reason: err instanceof Error ? err.message : String(err) }
+  } finally {
+    keep.pinging = false
+  }
+  // A turn that started meanwhile restarts the clock itself
+  if (cache.busy) return
+  const u = reply && reply.usage
+  if (!u) return stopKeepWarm($, 'the ping was not sent (' + ((reply && reply.reason) || 'no reply') + ')')
+  const read = u.cache_read_input_tokens || 0
+  const write = u.cache_creation_input_tokens || 0
+  // A warm ping reads the transcript and writes little more than its own message
+  if (read === 0 || write >= 0.1 * read) {
+    // That write cached the transcript again, so it is warm from now; just not cheaply
+    if (write > 0) cache = { ...cache, at: Date.now() }
+    return stopKeepWarm($, 'the cache had already gone (the ping re-wrote ' + formatTokens(write) + ' tokens)')
+  }
+  keep.pings += 1
+  cache = { ...cache, at: Date.now() }
+  await $.store.set(CACHE_KEY, { at: cache.at, turnAt: cache.turnAt, startedAt: cache.startedAt })
+  armCache($)
+  $.ui.invalidate('ui.render')
+}
 
 function toMs(value) {
   if (typeof value === 'number') return value < 1e12 ? value * 1000 : value
@@ -253,6 +388,14 @@ async function refresh($) {
     if (usage && usage.startedAt && totals.startedAt !== usage.startedAt) {
       totals = { startedAt: usage.startedAt, input: 0, output: 0, cache: 0 }
     }
+    // After /clear the next request starts a new transcript, so the old cache is no use
+    if (usage && usage.startedAt) {
+      sessionStartedAt = usage.startedAt
+      if (cache.at && cache.startedAt !== usage.startedAt) {
+        cache = { ...cache, at: 0, turnAt: 0 }
+        armCache($)
+      }
+    }
   } catch {
     // keep what is shown
   }
@@ -326,6 +469,10 @@ const ICONS = {
     '><path d="M8 2v7.5M5 7l3 3 3-3"/><path d="M2 10v3.5h12V10"/></g>',
   layers: (x, c) => '<g transform="translate(' + x + ' 9)" stroke="' + c + '"' + ICON_ATTR +
     '><path d="M8 2l6 3-6 3-6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/></g>',
+  flame: (x, c) => '<g transform="translate(' + x + ' 9)" stroke="' + c + '"' + ICON_ATTR +
+    '><path d="M8 1.8c.5 2.4 4 3.8 4 7.4a4 4 0 0 1-8 0c0-1.7.8-2.8 1.7-3.5.1 1.3.7 2.1 1.6 2.3C6.9 6.1 7.1 3.7 8 1.8z"/></g>',
+  snow: (x, c) => '<g transform="translate(' + x + ' 9)" stroke="' + c + '"' + ICON_ATTR +
+    '><path d="M8 1.5v13M2.4 4.75l11.2 6.5M2.4 11.25l11.2-6.5"/><path d="M6.3 2.6L8 4l1.7-1.4M6.3 13.4L8 12l1.7 1.4"/></g>',
   coin: (x, c) => '<g transform="translate(' + x + ' 9)" stroke="' + c + '"' + ICON_ATTR +
     '><circle cx="8" cy="8" r="6.2"/><path d="M10 6c-.4-.8-1.2-1.2-2-1.2-1.2 0-2 .6-2 1.5 0 2 4 1 4 3 0 .9-.9 1.5-2 1.5-.9 0-1.7-.4-2-1.2M8 3.8v8.4"/></g>',
 }
@@ -562,6 +709,20 @@ function statPill(x, icon, color, str) {
   return { w, svg: pillBg(x, w, color) + ICONS[icon](x + 14, color) + text(x + 14 + 24, str, TEXT) }
 }
 
+// "cache 42m", or "cache 42m · kept 5h 10m" while keep-warm is holding it
+function cacheText(now) {
+  const label = cacheLabel(now)
+  const kept = keptLeft(now)
+  if (isCompact()) return label + (kept ? ' ⟳' : '')
+  return 'cache ' + label + (kept ? ' · kept ' + formatLeft(kept) : '')
+}
+
+function cachePill(x, now) {
+  if (cacheLabel(now) === 'cold') return statPill(x, 'snow', COLORS.cold, isCompact() ? 'cold' : 'cache cold')
+  return statPill(x, 'flame', COLORS.warm, cacheText(now))
+}
+
+
 // The items of the band, each built at x = 0 as { w, svg }
 function buildItems(now) {
   const makers = []
@@ -572,6 +733,7 @@ function buildItems(now) {
   if (flag('showGit', true) && git.branch) {
     makers.push((px) => statPill(px, 'branch', COLORS.git, git.branch + (git.dirty ? ' ●' : '')))
   }
+  if (flag('showCache', true)) makers.push((px) => cachePill(px, now))
   if (flag('showTokens', false)) {
     makers.push((px) => statPill(px, 'up', COLORS.up, formatTokens(totals.input)))
     makers.push((px) => statPill(px, 'down', COLORS.down, formatTokens(totals.output)))
@@ -679,6 +841,7 @@ function textLine(now) {
     bits.push('ctx ' + pct + '%' + (flag('warnContext', true) && pct >= 85 ? ' ⚠' : ''))
   }
   if (flag('showGit', true) && git.branch) bits.push('⎇ ' + git.branch + (git.dirty ? '*' : ''))
+  if (flag('showCache', true)) bits.push(isCompact() ? 'cache ' + cacheLabel(now) : cacheText(now))
   if (flag('showTokens', false)) {
     bits.push('↑' + formatTokens(totals.input), '↓' + formatTokens(totals.output), '◈' + formatTokens(totals.cache))
   }
@@ -749,6 +912,17 @@ function previewFor(key, isOn, now) {
       return sample([(x) => barPill(x, { icon: 'calendar', label: '7d', color: limitColor('seven_day'), pct: 24 })])
     case 'colorContext':
       return sample([(x) => barPill(x, { icon: 'layers', label: 'ctx', color: contextColor(), pct: 24 })])
+    case 'showCache':
+      return sample([
+        (x) => statPill(x, 'flame', COLORS.warm, 'cache 42m'),
+        (x) => statPill(x, 'snow', COLORS.cold, 'cache cold'),
+      ])
+    case 'cacheTtl':
+      return sample([(x) => statPill(x, 'flame', COLORS.warm, 'cache ' + formatCacheLeft(cacheTtlMs()))])
+    case 'keepWarm':
+    case 'keepWarmFor':
+      return sample([(x) => statPill(x, 'flame', COLORS.warm,
+        'cache 42m · kept ' + formatLeft(KEEP_WARM_MS[choice('keepWarmFor', '6h')] || KEEP_WARM_MS['6h']))])
     case 'showTokens':
       return sample([
         (x) => statPill(x, 'up', COLORS.up, '15.6k'),
@@ -778,17 +952,34 @@ export function register(on, options) {
     if (Array.isArray(savedOpen)) openGroups = savedOpen.filter((n) => Number.isInteger(n))
     const savedTotals = await $.store.get(TOTALS_KEY)
     if (savedTotals && typeof savedTotals === 'object') totals = savedTotals
+    const savedCache = await $.store.get(CACHE_KEY)
+    if (savedCache && typeof savedCache === 'object') {
+      cache = { at: savedCache.at || 0, turnAt: savedCache.turnAt || 0, startedAt: savedCache.startedAt || 0, busy: false }
+    }
     await refresh($)
+    armCache($)
     $.clock.every(60000, () => refresh($))
     return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
+    // a response arrived, so a running turn is still alive
+    if (cache.busy) cache = { ...cache, busyAt: Date.now() }
     await refresh($)
     return next(e)
   })
 
-  // Add each turn's tokens to the running totals
+  // A main-thread turn keeps the cache warm while it runs; subagent runs raise no turn.start
+  on('turn.start', async ($, e, next) => {
+    cache = { ...cache, busy: true, busyAt: Date.now() }
+    if (cacheTimer) cacheTimer.cancel()
+    cacheTimer = null
+    $.ui.invalidate('ui.render')
+    return next(e)
+  })
+
+  // Add each turn's tokens to the running totals. A main-thread turn that read or wrote
+  // the cache restarts its clock.
   on('turn.complete', async ($, e, next) => {
     const u = e.usage
     if (u) {
@@ -798,6 +989,17 @@ export function register(on, options) {
       await $.store.set(TOTALS_KEY, totals)
     }
     await refresh($)
+    if (!e.agentId) {
+      const touched = u && (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) > 0
+      const at = Date.now()
+      cache = touched ? { at, turnAt: at, startedAt: sessionStartedAt, busy: false } : { ...cache, busy: false }
+      if (touched) {
+        keep.stopped = null
+        await $.store.set(CACHE_KEY, { at: cache.at, turnAt: cache.turnAt, startedAt: cache.startedAt })
+      }
+      armCache($)
+      $.ui.invalidate('ui.render')
+    }
     return next(e)
   })
 
@@ -820,6 +1022,10 @@ export function register(on, options) {
       if (isColorKey(s.key)) isDirty = true
       else await persistToggles($)
       if (s.key === 'showGit') await refreshGit($)
+      if (s.key === 'cacheTtl' || s.key === 'keepWarm' || s.key === 'keepWarmFor') {
+        keep.stopped = null
+        armCache($)
+      }
       $.ui.invalidate('ui.render')
     }
 

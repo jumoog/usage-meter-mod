@@ -25,6 +25,10 @@
     "colorFiveHourHex": { "type": "string", "title": "5-hour custom color", "description": "Hex color used when the 5-hour color is custom, like #3fb58a", "default": "" },
     "colorSevenDayHex": { "type": "string", "title": "Weekly custom color", "description": "Hex color used when the weekly color is custom", "default": "" },
     "colorContextHex": { "type": "string", "title": "Context custom color", "description": "Hex color used when the context color is custom", "default": "" },
+    "showCache": { "type": "boolean", "title": "Prompt cache", "description": "Show whether the prompt cache is still warm, and for how long", "default": true },
+    "cacheTtl": { "type": "string", "title": "Prompt cache lifetime", "description": "How long the cache stays warm after a response: 1 hour on most plans, 5 minutes otherwise", "default": "1h", "options": ["1h", "5m"] },
+    "keepWarm": { "type": "boolean", "title": "Keep cache warm", "description": "While idle, send a one-word request shortly before the prompt cache expires so it stays warm. Each ping reads the cached context and counts toward plan usage", "default": false },
+    "keepWarmFor": { "type": "string", "title": "Keep warm for", "description": "How long after the last turn to keep pinging", "default": "6h", "options": ["1h", "3h", "6h", "12h"] },
     "showTokens": { "type": "boolean", "title": "Session tokens", "description": "Show input, output and cache tokens", "default": false },
     "showCost": { "type": "boolean", "title": "Session cost", "description": "Show what the session has cost", "default": false },
     "showOptionsButton": { "type": "boolean", "title": "Settings button", "description": "Show a gear next to the band that opens the options", "default": true }
