@@ -47,6 +47,7 @@ const COLOR_CHOICES = PALETTE.map(([id, name]) => [id, name])
 // Everything the settings pane lists, in groups. A `choices` entry cycles through its values on a press.
 const GROUPS = ['Appearance', 'Usage limits', 'Context window', 'Extras']
 const SETTINGS = [
+  { group: 0, key: 'style', label: 'Style', def: 'pills', choices: [['pills', 'Pills'], ['rings', 'Rings (progress circle)']] },
   { group: 0, key: 'roundPills', label: 'Fully rounded pills', def: false },
   { group: 0, key: 'lightTheme', label: 'Light theme text', def: false },
   {
@@ -314,9 +315,66 @@ const ICONS = {
     '><circle cx="8" cy="8" r="6.2"/><path d="M10 6c-.4-.8-1.2-1.2-2-1.2-1.2 0-2 .6-2 1.5 0 2 4 1 4 3 0 .9-.9 1.5-2 1.5-.9 0-1.7-.4-2-1.2M8 3.8v8.4"/></g>',
 }
 
+// ---- Rings style: a progress ring with the icon inside, then the percent and the time -------------
+
+const isRings = () => choice('style', 'pills') === 'rings'
+const itemGap = () => (isRings() ? 26 : 8)
+
+function ringItem(x, o) {
+  const R = 12
+  const C = 2 * Math.PI * R
+  const mx = x + 15 // ring centre
+  const my = 17
+  const compact = isCompact()
+  let state = null
+  if (o.pct !== null) {
+    if (o.warn) state = RED
+    else if (flag('alertColors', true)) state = stateColor(o.pct, o.marker)
+  }
+  const accent = state || o.color
+  let body = '<circle cx="' + mx + '" cy="' + my + '" r="' + R + '" fill="none" stroke="' + TEXT +
+    '" stroke-opacity="0.14" stroke-width="3"/>'
+  if (o.pct !== null && o.pct > 0) {
+    const arc = Math.max(2, (C * Math.min(100, o.pct)) / 100)
+    body += '<circle cx="' + mx + '" cy="' + my + '" r="' + R + '" fill="none" stroke="' + accent +
+      '" stroke-width="3" stroke-linecap="round" stroke-dasharray="' + arc + ' ' + C +
+      '" transform="rotate(-90 ' + mx + ' ' + my + ')"/>'
+  }
+  if (o.pct !== null && o.marker !== null && o.marker !== undefined) {
+    const a = o.marker * 2 * Math.PI - Math.PI / 2
+    const x1 = mx + (R - 4) * Math.cos(a)
+    const y1 = my + (R - 4) * Math.sin(a)
+    const x2 = mx + (R + 3) * Math.cos(a)
+    const y2 = my + (R + 3) * Math.sin(a)
+    body += '<line x1="' + x1.toFixed(2) + '" y1="' + y1.toFixed(2) + '" x2="' + x2.toFixed(2) + '" y2="' + y2.toFixed(2) +
+      '" stroke="' + TEXT + '" stroke-width="2" stroke-linecap="round"/>'
+  }
+  // the ring already says which limit it is, so the 5h one gets a clock like the reference style
+  body += ICONS[o.icon === 'gauge' ? 'clock' : o.icon](mx - 8, o.color)
+  let tx = x + 15 + R + 10
+  if (o.pct === null) {
+    body += text(tx, '–', MUTED)
+    return { w: tx + CW - x, svg: body }
+  }
+  const pctStr = o.pct + '%'
+  body += text(tx, pctStr, state || TEXT, true)
+  tx += pctStr.length * CW
+  if (!compact && o.tail) {
+    tx += 8
+    body += text(tx, o.tail, MUTED)
+    tx += o.tail.length * CW
+  }
+  return { w: tx - x, svg: body }
+}
+
+function ringStat(x, icon, color, str) {
+  const w = 16 + 8 + str.length * CW
+  return { w, svg: ICONS[icon](x, color) + text(x + 24, str, TEXT) }
+}
 // A pill with a bar: icon, label, bar (optional pace marker), percent, optional "| icon tail".
 // Compact layout keeps only the icon and the percent. `warn` forces the alert color.
 function barPill(x, o) {
+  if (isRings()) return ringItem(x, o)
   const BAR = 76
   const compact = isCompact()
   let cx = x + 14
@@ -396,6 +454,7 @@ function contextPill(x) {
 }
 
 function statPill(x, icon, color, str) {
+  if (isRings()) return ringStat(x, icon, color, str)
   const w = 14 + 16 + 8 + str.length * CW + 14
   return { w, svg: pillBg(x, w, color) + ICONS[icon](x + 14, color) + text(x + 14 + 24, str, TEXT) }
 }
@@ -406,7 +465,7 @@ function buildSvg(now) {
   let x = 0
   // pills are built at their final x, so each one's gap is settled before it is drawn
   const place = (make) => {
-    const gap = parts.length ? 8 : 0
+    const gap = parts.length ? itemGap() : 0
     const p = make(x + gap)
     parts.push(p.svg)
     x += gap + p.w
@@ -466,9 +525,9 @@ function miniSvg(pills, isOn) {
   for (const make of pills) {
     const p = make(x)
     parts.push(p.svg)
-    x += p.w + 8
+    x += p.w + itemGap()
   }
-  const w = Math.max(1, Math.ceil(x - 8))
+  const w = Math.max(1, Math.ceil(x - itemGap()))
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + PILL_H + '" viewBox="0 2 ' + w + ' ' +
     PILL_H + '"><g opacity="' + (isOn ? 1 : 0.4) + '">' + parts.join('') + '</g></svg>'
 }
@@ -492,6 +551,7 @@ function previewFor(key, isOn, now) {
     }
     case 'lightTheme':
       return sample([(x) => statPill(x, 'gauge', limitColor('five_hour'), 'Sample')])
+    case 'style':
     case 'layout':
       return sample([five({ pct: 24 })])
     case 'show5h':

@@ -7,6 +7,7 @@ A pill-style band above the Claude Code prompt (desktop app) that shows your pla
 - **Git branch**, with a dot when there are uncommitted changes
 - Optional **session tokens** and **cost**
 - Alert colors when you burn through a limit faster than time passes
+- Two styles: pills, or rings (a progress circle with the percent and the time)
 - Compact layout, light-theme text, rounded or rectangular pills, reset as countdown or clock time
 - Per-limit colors, including a custom hex color
 
