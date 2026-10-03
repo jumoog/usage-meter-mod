@@ -37,3 +37,9 @@ Color changes can be saved or cancelled; every other option is kept immediately.
 - The pills are drawn as an SVG on the desktop app; the terminal gets a plain text line instead.
 - The band's dark frame belongs to the app and can't be styled from a plugin.
 - Free-reset information isn't exposed to plugins, so it isn't shown.
+
+## Tests
+
+```bash
+claude plugin test .
+```n
