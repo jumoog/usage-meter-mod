@@ -1,0 +1,28 @@
+{
+  "name": "usage-meter-pills",
+  "version": "0.3.0",
+  "description": "Pill-style band above the prompt: plan limits, context window, git branch and more, each switchable. Options: /usage-meter-options",
+  "userConfig": {
+    "roundPills": { "type": "boolean", "title": "Fully rounded pills", "description": "Use fully rounded pills instead of rounded rectangles", "default": false },
+    "lightTheme": { "type": "boolean", "title": "Light theme text", "description": "Dark text for light backgrounds", "default": false },
+    "layout": { "type": "string", "title": "Layout", "description": "Full pills, compact (icon and percent only) or auto", "default": "full", "options": ["full", "compact", "auto"] },
+    "show5h": { "type": "boolean", "title": "5-hour limit", "description": "Show the 5-hour plan usage pill", "default": true },
+    "show7d": { "type": "boolean", "title": "Weekly limit", "description": "Show the 7-day plan usage pill", "default": true },
+    "showResetTime": { "type": "boolean", "title": "Reset time", "description": "Show when each limit resets", "default": true },
+    "resetFormat": { "type": "string", "title": "Reset format", "description": "Countdown (4h 25m) or clock time (17:40)", "default": "countdown", "options": ["countdown", "clock"] },
+    "showPaceMarker": { "type": "boolean", "title": "Pace marker", "description": "Mark how far through each limit window you are", "default": true },
+    "alertColors": { "type": "boolean", "title": "Alert colors", "description": "Amber or red when a limit is nearly used or used faster than time passes", "default": true },
+    "showContext": { "type": "boolean", "title": "Context window", "description": "Show how full the context window is", "default": true },
+    "warnContext": { "type": "boolean", "title": "Context warning", "description": "Turn the context pill red and warn when it is nearly full", "default": true },
+    "showGit": { "type": "boolean", "title": "Git branch", "description": "Show the current branch, with a dot when there are changes", "default": true },
+    "colorFiveHour": { "type": "string", "title": "5-hour color", "description": "Accent color of the 5-hour pill", "default": "green", "options": ["green", "purple", "blue", "orange", "amber", "red", "pink", "teal", "gray", "custom"] },
+    "colorSevenDay": { "type": "string", "title": "Weekly color", "description": "Accent color of the weekly pill", "default": "purple", "options": ["green", "purple", "blue", "orange", "amber", "red", "pink", "teal", "gray", "custom"] },
+    "colorContext": { "type": "string", "title": "Context color", "description": "Accent color of the context pill", "default": "blue", "options": ["green", "purple", "blue", "orange", "amber", "red", "pink", "teal", "gray", "custom"] },
+    "colorFiveHourHex": { "type": "string", "title": "5-hour custom color", "description": "Hex color used when the 5-hour color is custom, like #3fb58a", "default": "" },
+    "colorSevenDayHex": { "type": "string", "title": "Weekly custom color", "description": "Hex color used when the weekly color is custom", "default": "" },
+    "colorContextHex": { "type": "string", "title": "Context custom color", "description": "Hex color used when the context color is custom", "default": "" },
+    "showTokens": { "type": "boolean", "title": "Session tokens", "description": "Show input, output and cache tokens", "default": false },
+    "showCost": { "type": "boolean", "title": "Session cost", "description": "Show what the session has cost", "default": false },
+    "showOptionsButton": { "type": "boolean", "title": "Settings button", "description": "Show a gear next to the band that opens the options", "default": true }
+  }
+}
